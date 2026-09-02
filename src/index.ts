@@ -84,6 +84,7 @@ import {
   BackgroundJobSupervisor,
   type BackgroundTaskConcurrency,
   createDisplayNameMentionRewriter,
+  normalizeAgentName,
   resolveRuntimeAgentName,
 } from './utils';
 import type { ContextFile } from './utils/background-job-board';
@@ -785,19 +786,37 @@ export const OhMyOpenCodeLite: Plugin = async (ctx) => {
       // ones (host override > runtime override > plugin file).
       RuntimeConfig.get(ctx.directory).captureHostConfig(opencodeConfig);
 
-      // Force default_agent to 'orchestrator' when unset, and also when the
-      // user pointed it at an omos subagent name (opencode rejects subagent
-      // names as default_agent with "default agent must be a primary agent").
-      // Other values (opencode's built-in 'build'/'plan', or a user-defined
-      // primary agent) are respected. This guards against promptAsync calls
-      // that omit the `agent` field from falling back to 'build' when the
-      // orchestrator agent is temporarily unresolved.
+      // Force default_agent to the visible orchestrator entry when unset or when
+      // the user points it at its hidden alias or an omos subagent (OpenCode
+      // requires a primary default agent). Other primary agents are respected.
       if (runtime.setDefaultAgent) {
         const existing = (opencodeConfig as { default_agent?: string })
           .default_agent;
-        if (!existing || isSubagent(existing)) {
+        const orchestratorAlias = agents.orchestrator as
+          | {
+              displayName?: string;
+              hidden?: boolean;
+            }
+          | undefined;
+        const visibleOrchestrator =
+          orchestratorAlias?.hidden && orchestratorAlias.displayName
+            ? normalizeAgentName(orchestratorAlias.displayName)
+            : 'orchestrator';
+        const existingKey = normalizeAgentName(existing ?? '');
+        const existingEntry = existing
+          ? (agents[existingKey] as { mode?: string } | undefined)
+          : undefined;
+        const existingIsHiddenOrchestratorAlias =
+          existingKey === 'orchestrator' && orchestratorAlias?.hidden === true;
+        const existingIsSubagent =
+          isSubagent(existingKey) || existingEntry?.mode === 'subagent';
+        if (
+          !existing ||
+          existingIsHiddenOrchestratorAlias ||
+          existingIsSubagent
+        ) {
           (opencodeConfig as { default_agent?: string }).default_agent =
-            'orchestrator';
+            visibleOrchestrator;
         }
       }
 

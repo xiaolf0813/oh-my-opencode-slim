@@ -751,6 +751,114 @@ describe('plugin config model inheritance', () => {
     }
   });
 
+  test('config() writes the visible orchestrator display name as default_agent', async () => {
+    const hooks = await loadConfiguredPlugin({
+      council: {
+        presets: { default: { alpha: { model: 'test/councillor' } } },
+      },
+      agents: {
+        orchestrator: { displayName: 'EngineeringLead' },
+        council: { displayName: 'ArchitectureCouncil' },
+      },
+    });
+    const hostConfig: Record<string, unknown> = {};
+
+    try {
+      await hooks.config?.(hostConfig);
+
+      // The orchestrator's visible entry is keyed by its display name;
+      // canonical 'orchestrator' is only a hidden alias, so default_agent
+      // must target the display-name entry.
+      expect(hostConfig.default_agent).toBe('EngineeringLead');
+      const agents = hostConfig.agent as Record<
+        string,
+        Record<string, unknown>
+      >;
+      expect(agents.EngineeringLead?.hidden).toBeUndefined();
+      expect(agents.orchestrator?.hidden).toBe(true);
+      expect(agents.ArchitectureCouncil?.hidden).toBeUndefined();
+      expect(agents.council?.hidden).toBe(true);
+    } finally {
+      await hooks.dispose?.();
+    }
+  });
+
+  test('config() keeps plain orchestrator as default_agent without display names', async () => {
+    const hooks = await loadConfiguredPlugin({});
+    const hostConfig: Record<string, unknown> = {};
+
+    try {
+      await hooks.config?.(hostConfig);
+
+      expect(hostConfig.default_agent).toBe('orchestrator');
+    } finally {
+      await hooks.dispose?.();
+    }
+  });
+
+  test('config() respects host primary defaults and corrects subagent defaults to the visible orchestrator entry', async () => {
+    const hooks = await loadConfiguredPlugin({
+      agents: { orchestrator: { displayName: 'EngineeringLead' } },
+    });
+
+    try {
+      const hostPrimary: Record<string, unknown> = {
+        default_agent: 'build',
+      };
+      await hooks.config?.(hostPrimary);
+      expect(hostPrimary.default_agent).toBe('build');
+
+      const hostSubagent: Record<string, unknown> = {
+        default_agent: 'fixer',
+      };
+      await hooks.config?.(hostSubagent);
+      expect(hostSubagent.default_agent).toBe('EngineeringLead');
+    } finally {
+      await hooks.dispose?.();
+    }
+  });
+
+  test('config() replaces the canonical hidden orchestrator alias with the display-name entry', async () => {
+    const hooks = await loadConfiguredPlugin({
+      agents: { orchestrator: { displayName: 'EngineeringLead' } },
+    });
+
+    try {
+      const hostConfig: Record<string, unknown> = {
+        default_agent: 'orchestrator',
+      };
+      await hooks.config?.(hostConfig);
+      expect(hostConfig.default_agent).toBe('EngineeringLead');
+    } finally {
+      await hooks.dispose?.();
+    }
+  });
+
+  test('config() corrects a display-name subagent default to the visible orchestrator entry', async () => {
+    const hooks = await loadConfiguredPlugin({
+      agents: {
+        orchestrator: { displayName: 'EngineeringLead' },
+        librarian: { displayName: 'Researcher' },
+      },
+    });
+
+    try {
+      const hostConfig: Record<string, unknown> = {
+        default_agent: 'Researcher',
+      };
+      await hooks.config?.(hostConfig);
+      expect(hostConfig.default_agent).toBe('EngineeringLead');
+
+      const hostOrchestrator: Record<string, unknown> = {
+        default_agent: 'EngineeringLead',
+      };
+      await hooks.config?.(hostOrchestrator);
+      expect(hostOrchestrator.default_agent).toBe('EngineeringLead');
+    } finally {
+      await hooks.dispose?.();
+    }
+  });
+
   test('admission uses a direct host override from final agent config', async () => {
     await assertAdmissionUsesFinalModel(
       'fixer',
